@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8">
     <title>Simple Video Chat</title>
@@ -9,11 +10,13 @@
             margin: 10px;
             border: 2px solid #444;
         }
+
         #buttons {
             margin: 20px;
         }
     </style>
 </head>
+
 <body>
     <h2>Firebase Video Chat</h2>
     <div>
@@ -25,6 +28,7 @@
         <button onclick="createRoom()">Create Room</button>
         <button onclick="joinRoom()">Join Room</button>
     </div>
+
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
@@ -44,34 +48,41 @@
         const remoteVideo = document.getElementById("remoteVideo");
         const roomIdInput = document.getElementById("roomId");
 
-        const peer = new RTCPeerConnection({
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-        });
-
-        const iceCandidates = [];
+        let peer = null;
+        let localStream = null;
         let remoteSet = false;
+        const iceCandidates = [];
 
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                localVideo.srcObject = stream;
-                stream.getTracks().forEach(track => peer.addTrack(track, stream));
+        async function initPeer() {
+            peer = new RTCPeerConnection({
+                iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
             });
 
-        peer.ontrack = event => {
-            if (event.streams && event.streams[0]) {
-                remoteVideo.srcObject = event.streams[0];
-            }
-        };
+            peer.ontrack = event => {
+                if (event.streams && event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                }
+            };
 
-        peer.onicecandidate = e => {
-            if (e.candidate) {
-                const roomId = roomIdInput.value;
-                db.ref(`${roomId}/ice`).push(JSON.stringify(e.candidate));
+            peer.onicecandidate = e => {
+                if (e.candidate) {
+                    const roomId = roomIdInput.value;
+                    db.ref(`${roomId}/ice`).push(JSON.stringify(e.candidate));
+                }
+            };
+
+            if (!localStream) {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
             }
-        };
+            localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+        }
 
         async function createRoom() {
             const roomId = roomIdInput.value;
+            if (!roomId) return alert("Please enter a Room ID");
+
+            await initPeer();
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
             db.ref(`${roomId}`).set({ offer: JSON.stringify(offer) });
@@ -81,7 +92,7 @@
                     const answer = JSON.parse(snapshot.val());
                     await peer.setRemoteDescription(answer);
                     remoteSet = true;
-                    processIceCandidates(roomId);
+                    processIceCandidates();
                 }
             });
 
@@ -97,6 +108,9 @@
 
         async function joinRoom() {
             const roomId = roomIdInput.value;
+            if (!roomId) return alert("Please enter a Room ID");
+
+            await initPeer();
             const snapshot = await db.ref(`${roomId}/offer`).once("value");
             const offer = JSON.parse(snapshot.val());
             await peer.setRemoteDescription(offer);
@@ -116,7 +130,7 @@
             });
         }
 
-        function processIceCandidates(roomId) {
+        function processIceCandidates() {
             iceCandidates.forEach(async candidate => {
                 await peer.addIceCandidate(candidate);
             });
@@ -124,4 +138,5 @@
         }
     </script>
 </body>
+
 </html>
