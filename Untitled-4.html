@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>WebRTC + Firebase</title>
+    <style>
+        video {
+            width: 48%;
+            margin: 5px;
+            border: 2px solid #ccc;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Простой видеочат</h2>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+
+    <script>
+        // 🔁 ВСТАВЬ СЮДА СВОЙ КОНФИГ ИЗ FIREBASE
+        const firebaseConfig = {
+                apiKey: "AIzaSyD1Rfc3o_KYoShnOTMA4pGPxuPW2q2NSFQ",
+                authDomain: "video-3e0bd.firebaseapp.com",
+                projectId: "video-3e0bd",
+                storageBucket: "video-3e0bd.firebasestorage.app",
+                messagingSenderId: "521178909590",
+                appId: "1:521178909590:web:5cf157ff214b70e4106bb7"
+            };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const room = db.ref("webrtc-room");
+
+        const localVideo = document.getElementById("localVideo");
+        const remoteVideo = document.getElementById("remoteVideo");
+
+        const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+
+        peer.ontrack = e => remoteVideo.srcObject = e.streams[0];
+        peer.onicecandidate = e => {
+            if (e.candidate) room.child("ice").push(JSON.stringify(e.candidate));
+        };
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then(stream => {
+            localVideo.srcObject = stream;
+            stream.getTracks().forEach(track => peer.addTrack(track, stream));
+        });
+
+        // слушаем предложения / ответы
+        room.child("offer").on("value", async snap => {
+            const offer = snap.val();
+            if (offer && !peer.currentRemoteDescription) {
+                await peer.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
+                const answer = await peer.createAnswer();
+                await peer.setLocalDescription(answer);
+                room.child("answer").set(JSON.stringify(answer));
+            }
+        });
+
+        room.child("answer").on("value", async snap => {
+            const answer = snap.val();
+            if (answer && !peer.currentRemoteDescription) {
+                await peer.setRemoteDescription(new RTCSessionDescription(JSON.parse(answer)));
+            }
+        });
+
+        room.child("ice").on("child_added", snap => {
+            const candidate = new RTCIceCandidate(JSON.parse(snap.val()));
+            peer.addIceCandidate(candidate);
+        });
+
+        // Создать предложение если ты первый
+        async function startCall() {
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            room.child("offer").set(JSON.stringify(offer));
+        }
+
+        startCall();
+    </script>
+</body>
+
+</html>
