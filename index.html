@@ -70,21 +70,29 @@
         };
 
         async function startStream() {
-            const roomId = roomIdInput.value.trim();
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-            stream.getTracks().forEach(track => peer.addTrack(track, stream));
+  const roomId = roomIdInput.value.trim();
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  remoteVideo.srcObject = stream; // <-- Показывает камеру на телефоне
+  stream.getTracks().forEach(track => peer.addTrack(track, stream));
 
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            await db.ref(`${roomId}/offer`).set(JSON.stringify(offer));
+  const offer = await peer.createOffer();
+  await peer.setLocalDescription(offer);
+  await db.ref(`${roomId}/offer`).set(JSON.stringify(offer));
 
-            db.ref(`${roomId}/answer`).on("value", async snapshot => {
-                const val = snapshot.val();
-                if (val && !peer.remoteDescription) {
-                    const answer = JSON.parse(val);
-                    await peer.setRemoteDescription(answer);
-                }
-            });
+  db.ref(`${roomId}/answer`).on("value", async snapshot => {
+    const val = snapshot.val();
+    if (val && !peer.remoteDescription) {
+      const answer = JSON.parse(val);
+      await peer.setRemoteDescription(answer);
+    }
+  });
+
+  db.ref(`${roomId}/ice`).on("child_added", async snapshot => {
+    const candidate = JSON.parse(snapshot.val());
+    if (candidate) await peer.addIceCandidate(candidate).catch(()=>{});
+  });
+}
+
 
             db.ref(`${roomId}/ice`).on("child_added", async snapshot => {
                 const candidate = JSON.parse(snapshot.val());
