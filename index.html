@@ -110,10 +110,6 @@
             await peer.setLocalDescription(answer);
             await db.ref(`${roomId}/answer`).set(JSON.stringify(answer));
 
-            db.ref(`${roomId}/ice`).on("child_added", async snapshot => {
-                const candidate = JSON.parse(snapshot.val());
-                if (candidate) await peer.addIceCandidate(candidate).catch(() => { });
-            });
         }
     </script>
 </body>
