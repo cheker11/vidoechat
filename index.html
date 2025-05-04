@@ -2,38 +2,45 @@
 <html>
 
 <head>
-    <meta charset="utf-8">
-    <title>Simple Video Chat</title>
+    <meta charset="UTF-8">
+    <title>Односторонний стрим камеры</title>
     <style>
-        video {
-            width: 45%;
-            margin: 10px;
-            border: 2px solid #444;
+        body {
+            font-family: sans-serif;
+            text-align: center;
+            padding: 20px;
         }
 
-        #buttons {
-            margin: 20px;
+        video {
+            width: 90%;
+            max-width: 600px;
+            margin: 10px;
+            border: 2px solid #333;
+        }
+
+        input,
+        button {
+            padding: 8px 12px;
+            margin: 5px;
         }
     </style>
 </head>
 
 <body>
-    <h2>Firebase Video Chat</h2>
-    <div>
-        <video id="localVideo" autoplay playsinline muted></video>
-        <video id="remoteVideo" autoplay playsinline></video>
-    </div>
-    <div id="buttons">
-        <input id="roomId" placeholder="Room ID" />
-        <button onclick="createRoom()">Create Room</button>
-        <button onclick="joinRoom()">Join Room</button>
-    </div>
+    <h2>Односторонний стрим камеры 📷</h2>
+
+    <video id="remoteVideo" autoplay playsinline></video><br>
+    <input id="roomId" placeholder="Введите ID комнаты" />
+    <br>
+    <button onclick="startStream()">📷 Стримить (Телефон)</button>
+    <button onclick="viewStream()">🔗 Смотреть (Ноутбук)</button>
 
     <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+
     <script>
-        const firebaseConfig = {
+       const firebaseConfig = {
             apiKey: "AIzaSyD1Rfc3o_KYoShnOTMA4pGPxuPW2q2NSFQ",
             authDomain: "video-3e0bd.firebaseapp.com",
             projectId: "video-3e0bd",
@@ -44,97 +51,61 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
-        const localVideo = document.getElementById("localVideo");
-        const remoteVideo = document.getElementById("remoteVideo");
+        const peer = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+
         const roomIdInput = document.getElementById("roomId");
+        const remoteVideo = document.getElementById("remoteVideo");
 
-        let peer = null;
-        let localStream = null;
-        let remoteSet = false;
-        const iceCandidates = [];
+        peer.ontrack = event => {
+            remoteVideo.srcObject = event.streams[0];
+        };
 
-        async function initPeer() {
-            peer = new RTCPeerConnection({
-                iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-            });
-
-            peer.ontrack = event => {
-                if (event.streams && event.streams[0]) {
-                    remoteVideo.srcObject = event.streams[0];
-                }
-            };
-
-            peer.onicecandidate = e => {
-                if (e.candidate) {
-                    const roomId = roomIdInput.value;
-                    db.ref(`${roomId}/ice`).push(JSON.stringify(e.candidate));
-                }
-            };
-
-            if (!localStream) {
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
+        peer.onicecandidate = e => {
+            if (e.candidate) {
+                const roomId = roomIdInput.value;
+                db.ref(`${roomId}/ice`).push(JSON.stringify(e.candidate));
             }
-            localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
-        }
+        };
 
-        async function createRoom() {
-            const roomId = roomIdInput.value;
-            if (!roomId) return alert("Please enter a Room ID");
+        async function startStream() {
+            const roomId = roomIdInput.value.trim();
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            stream.getTracks().forEach(track => peer.addTrack(track, stream));
 
-            await initPeer();
             const offer = await peer.createOffer();
             await peer.setLocalDescription(offer);
-            db.ref(`${roomId}`).set({ offer: JSON.stringify(offer) });
+            await db.ref(`${roomId}/offer`).set(JSON.stringify(offer));
 
             db.ref(`${roomId}/answer`).on("value", async snapshot => {
-                if (snapshot.val() && !peer.remoteDescription) {
-                    const answer = JSON.parse(snapshot.val());
+                const val = snapshot.val();
+                if (val && !peer.remoteDescription) {
+                    const answer = JSON.parse(val);
                     await peer.setRemoteDescription(answer);
-                    remoteSet = true;
-                    processIceCandidates();
                 }
             });
 
             db.ref(`${roomId}/ice`).on("child_added", async snapshot => {
                 const candidate = JSON.parse(snapshot.val());
-                if (remoteSet) {
-                    await peer.addIceCandidate(candidate);
-                } else {
-                    iceCandidates.push(candidate);
-                }
+                if (candidate) await peer.addIceCandidate(candidate).catch(() => { });
             });
         }
 
-        async function joinRoom() {
-            const roomId = roomIdInput.value;
-            if (!roomId) return alert("Please enter a Room ID");
-
-            await initPeer();
-            const snapshot = await db.ref(`${roomId}/offer`).once("value");
-            const offer = JSON.parse(snapshot.val());
+        async function viewStream() {
+            const roomId = roomIdInput.value.trim();
+            const offerSnap = await db.ref(`${roomId}/offer`).once("value");
+            const offer = JSON.parse(offerSnap.val());
             await peer.setRemoteDescription(offer);
-            remoteSet = true;
 
             const answer = await peer.createAnswer();
             await peer.setLocalDescription(answer);
-            db.ref(`${roomId}/answer`).set(JSON.stringify(answer));
+            await db.ref(`${roomId}/answer`).set(JSON.stringify(answer));
 
             db.ref(`${roomId}/ice`).on("child_added", async snapshot => {
                 const candidate = JSON.parse(snapshot.val());
-                if (peer.remoteDescription) {
-                    await peer.addIceCandidate(candidate);
-                } else {
-                    iceCandidates.push(candidate);
-                }
+                if (candidate) await peer.addIceCandidate(candidate).catch(() => { });
             });
-        }
-
-        function processIceCandidates() {
-            iceCandidates.forEach(async candidate => {
-                await peer.addIceCandidate(candidate);
-            });
-            iceCandidates.length = 0;
         }
     </script>
 </body>
